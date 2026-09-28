@@ -7,8 +7,10 @@ import com.chris64233.cc.studyconsent.domain.ConsentEventType;
 import com.chris64233.cc.studyconsent.domain.Participant;
 import com.chris64233.cc.studyconsent.domain.Study;
 import com.chris64233.cc.studyconsent.domain.StudyVersion;
+import com.chris64233.cc.studyconsent.domain.SuspensionDecision;
 import com.chris64233.cc.studyconsent.repo.ActivityRecordRepository;
 import com.chris64233.cc.studyconsent.repo.ConsentEventRepository;
+import com.chris64233.cc.studyconsent.repo.SuspensionDecisionRepository;
 import com.chris64233.cc.studyconsent.repo.StudyVersionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +30,7 @@ public class AuthorizationQueryService {
     private final StudyVersionRepository versionRepository;
     private final ConsentEventRepository consentEventRepository;
     private final ActivityRecordRepository activityRecordRepository;
+    private final SuspensionDecisionRepository suspensionDecisionRepository;
     private final AuthorizationEvaluator evaluator;
     private final Clock clock;
 
@@ -35,12 +38,14 @@ public class AuthorizationQueryService {
                                      StudyVersionRepository versionRepository,
                                      ConsentEventRepository consentEventRepository,
                                      ActivityRecordRepository activityRecordRepository,
+                                     SuspensionDecisionRepository suspensionDecisionRepository,
                                      AuthorizationEvaluator evaluator,
                                      Clock clock) {
         this.studyService = studyService;
         this.versionRepository = versionRepository;
         this.consentEventRepository = consentEventRepository;
         this.activityRecordRepository = activityRecordRepository;
+        this.suspensionDecisionRepository = suspensionDecisionRepository;
         this.evaluator = evaluator;
         this.clock = clock;
     }
@@ -63,6 +68,18 @@ public class AuthorizationQueryService {
                        ConsentEventType eventType,
                        Integer versionNo,
                        java.util.Set<String> selectedActivityTypes) implements TimelineEntry {
+        }
+
+        /** 研究暂停/恢复决定（研究级时间线事件，对该研究全部参与者相同）。 */
+        record Suspension(Instant at,
+                          String externalEventId,
+                          String decisionType,
+                          String externalIncidentId,
+                          String reason,
+                          String scope,
+                          java.util.Set<String> activityTypes,
+                          String suspendEventId,
+                          Integer declaredVersionNo) implements TimelineEntry {
         }
 
         /** 活动记录（仅被接受的活动会落库）。 */
@@ -97,6 +114,13 @@ public class AuthorizationQueryService {
             entries.add(new TimelineEntry.Consent(e.getEventTime(), e.getExternalEventId(),
                     e.getEventType(), e.getVersionNo(), e.getSelectedActivityTypes()));
         }
+        for (SuspensionDecision d : suspensionDecisionRepository
+                .findByStudyIdOrderByEffectiveAtAscIdAsc(study.getId())) {
+            entries.add(new TimelineEntry.Suspension(d.getEffectiveAt(), d.getExternalEventId(),
+                    d.getDecisionType().name(), d.getExternalIncidentId(), d.getReason(),
+                    d.getScope() == null ? null : d.getScope().name(),
+                    d.getActivityTypes(), d.getSuspendEventId(), d.getDeclaredVersionNo()));
+        }
         for (ActivityRecord a : activityRecordRepository
                 .findByStudyIdAndParticipantIdOrderByOccurredAtAscIdAsc(study.getId(), participant.getId())) {
             entries.add(new TimelineEntry.Activity(a.getOccurredAt(), a.getExternalEventId(),
@@ -104,12 +128,13 @@ public class AuthorizationQueryService {
                     a.getAuthorizedByConsentEventId(), explainAccepted(a)));
         }
 
-        // 版本发布(0) → 同意(1) → 活动(2)，保证同一时间点因果可读
+        // 版本发布(0) → 暂停/恢复(1) → 同意(2) → 活动(3)，保证同一时间点因果可读
         entries.sort(Comparator.comparing(TimelineEntry::at)
                 .thenComparingInt(e -> switch (e) {
                     case TimelineEntry.VersionPublished ignored -> 0;
-                    case TimelineEntry.Consent ignored -> 1;
-                    case TimelineEntry.Activity ignored -> 2;
+                    case TimelineEntry.Suspension ignored -> 1;
+                    case TimelineEntry.Consent ignored -> 2;
+                    case TimelineEntry.Activity ignored -> 3;
                 }));
         return entries;
     }

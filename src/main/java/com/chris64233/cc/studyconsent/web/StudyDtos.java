@@ -39,4 +39,38 @@ public class StudyDtos {
             Set<String> allowedActivityTypes,
             java.time.Instant publishedAt) {
     }
+
+    /**
+     * 暂停决定请求。activityTypes 为 null/空表示暂停整个研究，
+     * 非空时仅暂停给定活动类型。effectiveAt 可空（默认 Clock）。
+     */
+    public record SuspendRequest(
+            @NotBlank String externalEventId,
+            @NotBlank String externalIncidentId,
+            @NotBlank String reason,
+            Set<String> activityTypes,
+            java.time.Instant effectiveAt) {
+    }
+
+    /** 恢复申请请求；effectiveAt 可空（默认 Clock）。 */
+    public record ResumeRequest(
+            @NotBlank String externalEventId,
+            @NotBlank String suspendEventId,
+            @jakarta.validation.constraints.NotNull Integer declaredVersionNo,
+            java.time.Instant effectiveAt) {
+    }
+
+    public record SuspensionDecisionResponse(
+            Long id,
+            String externalEventId,
+            String decisionType,
+            String externalIncidentId,
+            String reason,
+            String scope,
+            Set<String> activityTypes,
+            String suspendEventId,
+            Integer declaredVersionNo,
+            java.time.Instant effectiveAt,
+            java.time.Instant recordedAt) {
+    }
 }
