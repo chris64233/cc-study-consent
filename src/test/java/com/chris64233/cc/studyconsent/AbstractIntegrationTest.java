@@ -21,6 +21,7 @@ public abstract class AbstractIntegrationTest {
         jdbcTemplate.update("delete from consent_event_activity");
         jdbcTemplate.update("delete from consent_event");
         jdbcTemplate.update("delete from activity_record");
+        jdbcTemplate.update("delete from study_decision");
         jdbcTemplate.update("delete from study_version_activity");
         jdbcTemplate.update("delete from study_version");
         jdbcTemplate.update("delete from participant");

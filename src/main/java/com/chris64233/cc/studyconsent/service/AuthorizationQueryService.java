@@ -7,8 +7,10 @@ import com.chris64233.cc.studyconsent.domain.ConsentEventType;
 import com.chris64233.cc.studyconsent.domain.Participant;
 import com.chris64233.cc.studyconsent.domain.Study;
 import com.chris64233.cc.studyconsent.domain.StudyVersion;
+import com.chris64233.cc.studyconsent.domain.StudyDecision;
 import com.chris64233.cc.studyconsent.repo.ActivityRecordRepository;
 import com.chris64233.cc.studyconsent.repo.ConsentEventRepository;
+import com.chris64233.cc.studyconsent.repo.StudyDecisionRepository;
 import com.chris64233.cc.studyconsent.repo.StudyVersionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +30,7 @@ public class AuthorizationQueryService {
     private final StudyVersionRepository versionRepository;
     private final ConsentEventRepository consentEventRepository;
     private final ActivityRecordRepository activityRecordRepository;
+    private final StudyDecisionRepository decisionRepository;
     private final AuthorizationEvaluator evaluator;
     private final Clock clock;
 
@@ -35,12 +38,14 @@ public class AuthorizationQueryService {
                                      StudyVersionRepository versionRepository,
                                      ConsentEventRepository consentEventRepository,
                                      ActivityRecordRepository activityRecordRepository,
+                                     StudyDecisionRepository decisionRepository,
                                      AuthorizationEvaluator evaluator,
                                      Clock clock) {
         this.studyService = studyService;
         this.versionRepository = versionRepository;
         this.consentEventRepository = consentEventRepository;
         this.activityRecordRepository = activityRecordRepository;
+        this.decisionRepository = decisionRepository;
         this.evaluator = evaluator;
         this.clock = clock;
     }
@@ -63,6 +68,19 @@ public class AuthorizationQueryService {
                        ConsentEventType eventType,
                        Integer versionNo,
                        java.util.Set<String> selectedActivityTypes) implements TimelineEntry {
+        }
+
+        /**
+         * 研究决定：研究级暂停，或该参与者自己的恢复确认（他人的恢复不展示）。
+         */
+        record Decision(Instant at,
+                        String externalEventId,
+                        String decisionType,
+                        String scopeType,
+                        String scopeActivityType,
+                        String reason,
+                        Integer resumeVersionNo,
+                        String resumesExternalEventId) implements TimelineEntry {
         }
 
         /** 活动记录（仅被接受的活动会落库）。 */
@@ -97,6 +115,25 @@ public class AuthorizationQueryService {
             entries.add(new TimelineEntry.Consent(e.getEventTime(), e.getExternalEventId(),
                     e.getEventType(), e.getVersionNo(), e.getSelectedActivityTypes()));
         }
+        for (StudyDecision d : decisionRepository
+                .findByStudyIdOrderByEffectiveAtAscIdAsc(study.getId())) {
+            // 展示所有研究级暂停，以及该参与者自己的恢复确认（其他参与者的恢复与其无关）
+            boolean ownResume = d.getDecisionType() == com.chris64233.cc.studyconsent.domain.DecisionType.RESUME
+                    && participant.getId().equals(d.getParticipantId());
+            if (d.getDecisionType() == com.chris64233.cc.studyconsent.domain.DecisionType.SUSPEND
+                    || ownResume) {
+                String resumesEventId = null;
+                if (d.getResumesDecisionId() != null) {
+                    resumesEventId = decisionRepository.findById(d.getResumesDecisionId())
+                            .map(StudyDecision::getExternalEventId).orElse(null);
+                }
+                entries.add(new TimelineEntry.Decision(d.getEffectiveAt(), d.getExternalEventId(),
+                        d.getDecisionType().name(),
+                        d.getScopeType() == null ? null : d.getScopeType().name(),
+                        d.getScopeActivityType(), d.getReason(),
+                        d.getResumeVersionNo(), resumesEventId));
+            }
+        }
         for (ActivityRecord a : activityRecordRepository
                 .findByStudyIdAndParticipantIdOrderByOccurredAtAscIdAsc(study.getId(), participant.getId())) {
             entries.add(new TimelineEntry.Activity(a.getOccurredAt(), a.getExternalEventId(),
@@ -104,12 +141,13 @@ public class AuthorizationQueryService {
                     a.getAuthorizedByConsentEventId(), explainAccepted(a)));
         }
 
-        // 版本发布(0) → 同意(1) → 活动(2)，保证同一时间点因果可读
+        // 版本发布(0) → 暂停/恢复决定(1) → 同意(2) → 活动(3)，保证同一时间点因果可读
         entries.sort(Comparator.comparing(TimelineEntry::at)
                 .thenComparingInt(e -> switch (e) {
                     case TimelineEntry.VersionPublished ignored -> 0;
-                    case TimelineEntry.Consent ignored -> 1;
-                    case TimelineEntry.Activity ignored -> 2;
+                    case TimelineEntry.Decision ignored -> 1;
+                    case TimelineEntry.Consent ignored -> 2;
+                    case TimelineEntry.Activity ignored -> 3;
                 }));
         return entries;
     }

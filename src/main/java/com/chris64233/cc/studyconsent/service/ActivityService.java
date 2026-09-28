@@ -6,6 +6,7 @@ import com.chris64233.cc.studyconsent.domain.Participant;
 import com.chris64233.cc.studyconsent.domain.Study;
 import com.chris64233.cc.studyconsent.repo.ActivityRecordRepository;
 import com.chris64233.cc.studyconsent.repo.ParticipantRepository;
+import com.chris64233.cc.studyconsent.repo.StudyRepository;
 import com.chris64233.cc.studyconsent.service.exception.ActivityNotAuthorizedException;
 import com.chris64233.cc.studyconsent.service.exception.ConflictException;
 import com.chris64233.cc.studyconsent.service.exception.NotFoundException;
@@ -18,11 +19,12 @@ import java.util.List;
 /**
  * 研究活动执行记录。
  *
- * <p>活动必须在"发生时间点"存在有效授权才允许落库；与撤回并发时，
- * 参与者行锁保证两者串行：</p>
+ * <p>活动必须在"发生时间点"存在有效授权才允许落库。统一锁序为
+ * <b>先研究行级写锁、再参与者行级写锁</b>，使活动登记与撤回、暂停/恢复、
+ * 版本发布严格串行：</p>
  * <ul>
- *   <li>活动先提交：随后的撤回若生效时间 ≤ 活动发生时间会被拒绝；</li>
- *   <li>撤回先提交：授权评估能看到撤回事件，活动被拒绝。</li>
+ *   <li>活动先提交：随后的撤回/暂停若生效时间 ≤ 活动发生时间会被拒绝；</li>
+ *   <li>撤回/暂停先生效：授权评估能看到该决定，活动被拒绝。</li>
  * </ul>
  */
 @Service
@@ -30,17 +32,20 @@ public class ActivityService {
 
     private final ActivityRecordRepository activityRecordRepository;
     private final ParticipantRepository participantRepository;
+    private final StudyRepository studyRepository;
     private final StudyService studyService;
     private final AuthorizationEvaluator evaluator;
     private final Clock clock;
 
     public ActivityService(ActivityRecordRepository activityRecordRepository,
                            ParticipantRepository participantRepository,
+                           StudyRepository studyRepository,
                            StudyService studyService,
                            AuthorizationEvaluator evaluator,
                            Clock clock) {
         this.activityRecordRepository = activityRecordRepository;
         this.participantRepository = participantRepository;
+        this.studyRepository = studyRepository;
         this.studyService = studyService;
         this.evaluator = evaluator;
         this.clock = clock;
@@ -58,10 +63,11 @@ public class ActivityService {
                                  String activityType,
                                  String externalEventId,
                                  Instant occurredAt) {
-        Study study = studyService.getStudy(studyCode);
+        Study study = studyRepository.findForUpdateByStudyCode(studyCode)
+                .orElseThrow(() -> new NotFoundException("研究不存在: " + studyCode));
         Participant participant = studyService.getParticipant(participantCode);
 
-        // 与签署/撤回共用同一把参与者行锁
+        // 统一锁序：研究锁之后锁参与者行
         participantRepository.findForUpdateById(participant.getId()).orElseThrow();
 
         // 外部事件号幂等：相同号返回既有记录（不重复记录活动）

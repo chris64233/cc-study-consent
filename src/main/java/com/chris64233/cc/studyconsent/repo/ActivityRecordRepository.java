@@ -21,4 +21,11 @@ public interface ActivityRecordRepository extends JpaRepository<ActivityRecord, 
      */
     boolean existsByStudyIdAndParticipantIdAndOccurredAtGreaterThanEqual(
             Long studyId, Long participantId, Instant occurredAt);
+
+    /** 研究范围内是否存在发生时间不早于指定时间的活动（任意参与者、任意类型）。 */
+    boolean existsByStudyIdAndOccurredAtGreaterThanEqual(Long studyId, Instant occurredAt);
+
+    /** 研究范围内某类活动是否存在发生时间不早于指定时间的记录。 */
+    boolean existsByStudyIdAndActivityTypeAndOccurredAtGreaterThanEqual(
+            Long studyId, String activityType, Instant occurredAt);
 }

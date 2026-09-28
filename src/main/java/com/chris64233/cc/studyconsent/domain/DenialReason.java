@@ -21,7 +21,13 @@ public enum DenialReason {
     ACTIVITY_NOT_SELECTED("同意书未选择该活动类型"),
 
     /** 评估时间点的生效方案版本不允许该活动类型（含被新版本移除的情形）。 */
-    ACTIVITY_NOT_ALLOWED_IN_VERSION("该活动类型不在生效方案版本的允许范围内");
+    ACTIVITY_NOT_ALLOWED_IN_VERSION("该活动类型不在生效方案版本的允许范围内"),
+
+    /** 研究整体或该类活动在评估时间点处于暂停中，恢复前不得登记新活动。 */
+    STUDY_SUSPENDED("研究处于暂停中，恢复前不得登记新活动"),
+
+    /** 暂停期间发布了实质变更版本，受影响参与者须对当前版本重新签署后才能恢复授权。 */
+    RECONSENT_REQUIRED_AFTER_SUSPENSION("暂停期间发布了实质变更版本，须对当前版本重新签署后才能恢复授权");
 
     private final String description;
 
